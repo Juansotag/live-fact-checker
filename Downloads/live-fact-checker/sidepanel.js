@@ -475,12 +475,20 @@
       const correctedText = await correctText(textToCorrect);
       
       if (correctedText && correctedText.length > 20) {
+        // Validate: allow small deviations (±10%), reject drastic changes (>50% or >1.5x)
+        const lengthRatio = correctedText.length / textToCorrect.length;
+        if (lengthRatio < 0.5 || lengthRatio > 1.5) {
+          console.warn(`[TextCorrection] Response too different (ratio ${lengthRatio.toFixed(2)} — outside 0.5-1.5 range), rejecting`);
+          state.lastCorrectedLength += textToCorrect.length;
+          return;
+        }
+        
         const beforeText = state.fullText.slice(0, state.lastCorrectedLength);
         const afterText = state.fullText.slice(state.lastCorrectedLength + textToCorrect.length);
         state.fullText = (beforeText + correctedText + (afterText ? ' ' + afterText : '')).trim();
         state.lastCorrectedLength = (beforeText + correctedText).length;
         
-        console.log(`[TextCorrection] ✓ Applied correction (${textToCorrect.length}→${correctedText.length} chars), now at position ${state.lastCorrectedLength}`);
+        console.log(`[TextCorrection] ✓ Applied correction (${textToCorrect.length}→${correctedText.length} chars, ratio ${lengthRatio.toFixed(2)})`);
       } else {
         console.warn(`[TextCorrection] Empty response, advancing pointer`);
         state.lastCorrectedLength += textToCorrect.length;
