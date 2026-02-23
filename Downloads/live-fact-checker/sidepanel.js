@@ -475,10 +475,10 @@
       const correctedText = await correctText(textToCorrect);
       
       if (correctedText && correctedText.length > 20) {
-        // Validate: allow small deviations (±10%), reject drastic changes (>50% or >1.5x)
+        // Validate: strict ±10% tolerance (0.9 to 1.1 ratio)
         const lengthRatio = correctedText.length / textToCorrect.length;
-        if (lengthRatio < 0.5 || lengthRatio > 1.5) {
-          console.warn(`[TextCorrection] Response too different (ratio ${lengthRatio.toFixed(2)} — outside 0.5-1.5 range), rejecting`);
+        if (lengthRatio < 0.9 || lengthRatio > 1.1) {
+          console.warn(`[TextCorrection] Response differs by more than ±10% (ratio ${lengthRatio.toFixed(2)}), rejecting`);
           state.lastCorrectedLength += textToCorrect.length;
           return;
         }
