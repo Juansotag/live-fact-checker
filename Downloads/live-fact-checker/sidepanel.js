@@ -488,6 +488,9 @@
         state.fullText = (beforeText + correctedText + (afterText ? ' ' + afterText : '')).trim();
         state.lastCorrectedLength = (beforeText + correctedText).length;
         
+        // UPDATE UI: Rebuild transcript display from corrected fullText
+        rebuildTranscriptFromFullText();
+        
         console.log(`[TextCorrection] ✓ CORRECTED:`);
         console.log(`  ORIGINAL: "${textToCorrect}"`);
         console.log(`  CORRECTED: "${correctedText}"`);
@@ -502,6 +505,25 @@
     }
   }
 
+  function rebuildTranscriptFromFullText() {
+    // Clear and rebuild the entire transcript display from state.fullText
+    dom.transcript.innerHTML = '';
+    if (!state.fullText || state.fullText.length === 0) {
+      const ph = document.createElement('div');
+      ph.className = 'placeholder-text';
+      ph.textContent = getTranslation('waitingForText');
+      dom.transcript.appendChild(ph);
+      return;
+    }
+    
+    // Render the full corrected text as flowing HTML
+    const p = document.createElement('p');
+    p.className = 'transcript-block';
+    p.textContent = state.fullText;
+    dom.transcript.appendChild(p);
+  }
+  }
+
   function rebuildTranscriptDisplay() {
     // DISABLED: Don't rebuild entire display as it loses streaming captions
     // The transcript display works fine with individual caption blocks
@@ -512,24 +534,29 @@
     const lang = getEffectiveLanguage();
     const langName = lang === 'en' ? 'English' : 'Spanish';
     
-    // More aggressive prompt that explicitly removes CC errors and fillers
-    const prompt = `Fix closed captions errors in this ${langName} text:
+    // CRITICAL: Be explicit that we want THE SAME TEXT but corrected
+    const prompt = `You are a closed captions editor. Fix ONLY these errors in this exact ${langName} text:
+1. Remove filler words: "eh", "uh", "hm" (but keep ALL other words)
+2. Fix CC errors: "e para" → "para", "eh que" → "que" (remove leading "e" or "eh")
+3. Fix double spaces → single space
+4. Fix punctuation and capitalization at sentence ends
+5. CRITICAL: Return ONLY the corrected version of THIS EXACT TEXT
 
-RULES:
-1. Remove filler words: "eh", "uh", "hm" (but keep core text)
-2. Fix CC errors: "e para" → "para", "eh que" → "que", double spaces → single space
-3. Fix punctuation and capitalization (period at end of sentences)
-4. Keep the same MEANING and CONTENT (don't add/change words)
-5. Return ONLY the corrected text, nothing else
+Do NOT:
+- Paraphrase or restructure
+- Add explanations
+- Change the meaning
+- Return anything except the corrected text
 
-TEXT: """${text}"""
+TEXT TO CORRECT:
+"""${text}"""
 
-CORRECTED:`;
+CORRECTED TEXT (MUST be similar length, same meaning):`;
 
     console.log(`[correctText] Calling Gemini (text=${text.length} chars)...`);
     
     try {
-      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 1024 });
+      const r = await callGemini(prompt, { temperature: 0.0, maxTokens: 1024 });
       console.log(`[correctText] Raw response:`, r);
       
       if (!r || !r.text) {
