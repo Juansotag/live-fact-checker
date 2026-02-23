@@ -441,67 +441,39 @@
   }
 
   async function performTextCorrection() {
-    // Get new text that hasn't been corrected yet
-    const newText = state.fullText.slice(state.lastCorrectedLength).trim();
-    
-    if (newText.length < 30) {
-      console.log(`[TextCorrection] Skipping: too short (${newText.length} chars)`);
+    // Send ENTIRE fullText to Gemini every 30s (not just new fragments)
+    if (!state.fullText || state.fullText.length < 30) {
+      console.log(`[TextCorrection] Skipping: text too short (${state.fullText.length} chars)`);
       return;
     }
     
-    // Try to find a complete sentence (ending with . ? ! or , for pauses)
-    const sentenceEnds = ['. ', '? ', '! ', ', '];  // Look for complete boundaries
-    let textToCorrect = newText;
-    let lastSentenceEnd = -1;
-    
-    for (const end of sentenceEnds) {
-      const idx = newText.lastIndexOf(end);
-      if (idx > 0 && idx > lastSentenceEnd) {
-        lastSentenceEnd = idx + end.length;
-      }
-    }
-    
-    // If we found a sentence boundary, only correct up to that point
-    // Otherwise, correct everything we have so far
-    if (lastSentenceEnd > 50) {
-      textToCorrect = newText.substring(0, lastSentenceEnd).trim();
-      console.log(`[TextCorrection] Found sentence boundary: correcting ${textToCorrect.length} chars`);
-    } else {
-      console.log(`[TextCorrection] No sentence boundary found, using whole chunk: ${textToCorrect.length} chars`);
-    }
+    console.log(`[TextCorrection] Correcting entire text: ${state.fullText.length} chars`);
     
     try {
-      console.log(`[TextCorrection] Sending to Gemini: "${textToCorrect.substring(0, 60)}..."`);
-      const correctedText = await correctText(textToCorrect);
+      const correctedText = await correctText(state.fullText);
       
       if (correctedText && correctedText.length > 20) {
-        // Validate: strict ±10% tolerance (0.9 to 1.1 ratio)
-        const lengthRatio = correctedText.length / textToCorrect.length;
-        if (lengthRatio < 0.9 || lengthRatio > 1.1) {
-          console.warn(`[TextCorrection] Response differs by more than ±10% (ratio ${lengthRatio.toFixed(2)}), rejecting`);
-          state.lastCorrectedLength += textToCorrect.length;
+        // Validate: entire text should stay roughly the same size
+        const lengthRatio = correctedText.length / state.fullText.length;
+        if (lengthRatio < 0.85 || lengthRatio > 1.15) {
+          console.warn(`[TextCorrection] Response too different (ratio ${lengthRatio.toFixed(2)}), rejecting`);
           return;
         }
         
-        const beforeText = state.fullText.slice(0, state.lastCorrectedLength);
-        const afterText = state.fullText.slice(state.lastCorrectedLength + textToCorrect.length);
-        state.fullText = (beforeText + correctedText + (afterText ? ' ' + afterText : '')).trim();
-        state.lastCorrectedLength = (beforeText + correctedText).length;
+        // Replace entire text with corrected version
+        state.fullText = correctedText;
+        state.lastCorrectedLength = correctedText.length;
         
-        // UPDATE UI: Rebuild transcript display from corrected fullText
+        // Rebuild UI
         rebuildTranscriptFromFullText();
         
-        console.log(`[TextCorrection] ✓ CORRECTED:`);
-        console.log(`  ORIGINAL: "${textToCorrect}"`);
-        console.log(`  CORRECTED: "${correctedText}"`);
-        console.log(`  (${textToCorrect.length}→${correctedText.length} chars, ratio ${lengthRatio.toFixed(2)})`);
+        console.log(`[TextCorrection] ✓ CORRECTED ENTIRE TEXT`);
+        console.log(`  (${state.fullText.length}→${correctedText.length} chars, ratio ${lengthRatio.toFixed(2)})`);
       } else {
-        console.warn(`[TextCorrection] Empty response, advancing pointer`);
-        state.lastCorrectedLength += textToCorrect.length;
+        console.warn(`[TextCorrection] Empty response from Gemini`);
       }
     } catch (err) {
       console.error('[TextCorrection] Error:', err.message);
-      state.lastCorrectedLength += textToCorrect.length;
     }
   }
 
@@ -527,24 +499,26 @@
     const lang = getEffectiveLanguage();
     const langName = lang === 'en' ? 'English' : 'Spanish';
     
-    // CRITICAL: Be explicit that we want THE SAME TEXT but corrected
-    const prompt = `You are a closed captions editor. Fix ONLY these errors in this exact ${langName} text:
-1. Remove filler words: "eh", "uh", "hm" (but keep ALL other words)
-2. Fix CC errors: "e para" → "para", "eh que" → "que" (remove leading "e" or "eh")
-3. Fix double spaces → single space
-4. Fix punctuation and capitalization at sentence ends
-5. CRITICAL: Return ONLY the corrected version of THIS EXACT TEXT
+    // ULTRA-RESTRICTIVE: Only these operations, NOTHING else
+    const prompt = `You are a MINIMAL closed captions editor. 
 
-Do NOT:
-- Paraphrase or restructure
-- Add explanations
-- Change the meaning
-- Return anything except the corrected text
+ALLOWED OPERATIONS ONLY:
+1. Remove "e " prefix (e.g., "e para" → "para")
+2. Remove "eh " prefix (e.g., "eh que" → "que")
+3. Remove double spaces → single space
+4. Capitalize first letter if lowercase after punctuation
+5. Add period at very end if missing
 
-TEXT TO CORRECT:
-"""${text}"""
+ABSOLUTELY FORBIDDEN:
+- Change ANY words or sentence structure
+- Paraphrase or reword ANYTHING
+- Add quotation marks, commas, or any extra punctuation
+- Remove or truncate ANY content
+- Explain or comment on the text
 
-CORRECTED TEXT (MUST be similar length, same meaning):`;
+INPUT: """${text}"""
+
+OUTPUT: [exact same text with ONLY the 5 allowed fixes above applied]`;
 
     console.log(`[correctText] Calling Gemini (text=${text.length} chars)...`);
     
