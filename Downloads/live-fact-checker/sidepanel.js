@@ -443,19 +443,31 @@
   async function performTextCorrection() {
     // Get new text that hasn't been corrected yet
     const newText = state.fullText.slice(state.lastCorrectedLength).trim();
-    if (newText.length < 20) return;  // Only correct meaningful chunks
+    if (newText.length < 20) {
+      console.log(`[TextCorrection] Skipping: text too short (${newText.length} chars)`);
+      return;
+    }
     
-    console.log(`[TextCorrection] Correcting ${newText.length} chars of new text...`);
+    console.log(`[TextCorrection] Correcting ${newText.length} chars of new text:`, newText.substring(0, 50) + '...');
     
     try {
       const correctedText = await correctText(newText);
+      console.log(`[TextCorrection] Gemini returned:`, correctedText ? correctedText.substring(0, 50) + '...' : 'EMPTY');
+      
       if (correctedText && correctedText.length > 5) {
         // Update fullText with corrected version (only the new part)
         const beforeNew = state.fullText.slice(0, state.lastCorrectedLength);
-        state.fullText = beforeNew + correctedText;
+        const updated = beforeNew + correctedText;
+        
+        console.log(`[TextCorrection] Before: "${beforeNew.substring(beforeNew.length - 30)}"`);
+        console.log(`[TextCorrection] New corrected: "${correctedText.substring(0, 50)}"`);
+        
+        state.fullText = updated;
         state.pendingText = state.pendingText.replace(newText, correctedText);
         
-        console.log(`[TextCorrection] ✓ Corrected internally (no UI rebuild)`);
+        console.log(`[TextCorrection] ✓ Corrected and updated state`);
+      } else {
+        console.warn(`[TextCorrection] Returned text is empty or too short`);
       }
       
       state.lastCorrectedLength = state.fullText.length;
@@ -500,8 +512,24 @@ ${text}
 
 OUTPUT RULES: Return ONLY the corrected text. No explanations, no markdown, no JSON.`;
 
-    const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
-    return r.text.trim();
+    console.log(`[correctText] Calling Gemini with prompt (${prompt.length} chars)...`);
+    
+    try {
+      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
+      console.log(`[correctText] Response:`, r);
+      
+      if (!r || !r.text) {
+        console.warn(`[correctText] No response or empty text from Gemini`);
+        return text;  // Return original if Gemini fails
+      }
+      
+      const corrected = r.text.trim();
+      console.log(`[correctText] Corrected text (${corrected.length} chars): "${corrected.substring(0, 80)}..."`);
+      return corrected;
+    } catch (err) {
+      console.error(`[correctText] Exception:`, err);
+      return text;  // Return original on error
+    }
   }
 
   function getAdaptiveInterval() {
