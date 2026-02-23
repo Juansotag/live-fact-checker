@@ -450,15 +450,15 @@
     try {
       const correctedText = await correctText(newText);
       if (correctedText && correctedText !== newText) {
-        // Replace in fullText
-        const correctedFullText = state.fullText.slice(0, state.lastCorrectedLength) + newText.replace(newText, correctedText);
-        state.fullText = correctedFullText;
+        // Update fullText with corrected version
+        const beforeNew = state.fullText.slice(0, state.lastCorrectedLength);
+        state.fullText = beforeNew + correctedText;
         state.pendingText = state.pendingText.replace(newText, correctedText);
         
-        // Update transcript blocks with corrected text
-        updateTranscriptWithCorrection(newText, correctedText);
+        // Rebuild transcript display with corrected text
+        rebuildTranscriptDisplay();
         
-        console.log(`[TextCorrection] ✓ Corrected: "${newText.substring(0,60)}..." → "${correctedText.substring(0,60)}..."`);
+        console.log(`[TextCorrection] ✓ Corrected and updated display`);
       }
       
       state.lastCorrectedLength = state.fullText.length;
@@ -467,7 +467,19 @@
     }
   }
 
-  async function correctText(text) {
+  function rebuildTranscriptDisplay() {
+    // Clear and rebuild transcript UI with corrected text
+    const placeholder = dom.transcript.querySelector('.placeholder-text');
+    if (placeholder) placeholder.remove();
+    
+    dom.transcript.innerHTML = '';
+    
+    // Show the entire corrected text as flowing paragraph
+    const para = document.createElement('p');
+    para.className = 'transcript-block';
+    para.textContent = state.fullText;
+    dom.transcript.appendChild(para);
+  }
     const lang = getEffectiveLanguage();
     const langNames = {en:'English',es:'Spanish'};
     const langName = langNames[lang] || 'Spanish';
@@ -489,16 +501,6 @@ CORRECTED TEXT (${langName}):`;
 
     const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
     return r.text.trim();
-  }
-
-  function updateTranscriptWithCorrection(original, corrected) {
-    // Find and replace corrected text in transcript blocks
-    const blocks = dom.transcript.querySelectorAll('.transcript-block');
-    for (const block of blocks) {
-      if (block.textContent.includes(original)) {
-        block.textContent = block.textContent.replace(original, corrected) + ' ';
-      }
-    }
   }
 
   function getAdaptiveInterval() {
