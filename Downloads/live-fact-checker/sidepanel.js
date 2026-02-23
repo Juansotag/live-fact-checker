@@ -57,6 +57,10 @@
     whisperCallbacks: {},
     whisperCurrentModel: '',
     batchMode: false,
+
+    // Text correction state
+    lastCorrectedLength: 0,  // track how much text we've already corrected
+    correctionTimer: null,   // timer for periodic correction
   };
 
   // ==========================================================
@@ -419,6 +423,82 @@
     // For now: only capture captions, don't auto-check claims
     // User can manually click "Analyze Video" for fact-checking later
     // scheduleNextClaimCheck();  // DISABLED: focus on clean caption capture first
+    
+    // Start periodic text correction (every 30s)
+    scheduleTextCorrection();
+  }
+
+  // ==========================================================
+  // TEXT CORRECTION (Gemini auto-correction every 30s)
+  // ==========================================================
+  function scheduleTextCorrection() {
+    if (state.correctionTimer) clearInterval(state.correctionTimer);
+    state.correctionTimer = setInterval(() => {
+      if (state.isRunning && state.fullText.length > state.lastCorrectedLength) {
+        performTextCorrection();
+      }
+    }, 30000);  // Every 30 seconds
+  }
+
+  async function performTextCorrection() {
+    // Get new text that hasn't been corrected yet
+    const newText = state.fullText.slice(state.lastCorrectedLength).trim();
+    if (newText.length < 20) return;  // Only correct meaningful chunks
+    
+    console.log(`[TextCorrection] Correcting ${newText.length} chars of new text...`);
+    
+    try {
+      const correctedText = await correctText(newText);
+      if (correctedText && correctedText !== newText) {
+        // Replace in fullText
+        const correctedFullText = state.fullText.slice(0, state.lastCorrectedLength) + newText.replace(newText, correctedText);
+        state.fullText = correctedFullText;
+        state.pendingText = state.pendingText.replace(newText, correctedText);
+        
+        // Update transcript blocks with corrected text
+        updateTranscriptWithCorrection(newText, correctedText);
+        
+        console.log(`[TextCorrection] ✓ Corrected: "${newText.substring(0,60)}..." → "${correctedText.substring(0,60)}..."`);
+      }
+      
+      state.lastCorrectedLength = state.fullText.length;
+    } catch (err) {
+      console.error('[TextCorrection] Error:', err.message);
+    }
+  }
+
+  async function correctText(text) {
+    const lang = getEffectiveLanguage();
+    const langNames = {en:'English',es:'Spanish'};
+    const langName = langNames[lang] || 'Spanish';
+    
+    const prompt = `You are a professional editor. Correct ONLY the following issues in this ${langName} text:
+- Fix punctuation and capitalization
+- Correct spelling errors
+- Improve grammar and readability
+- Maintain the original meaning exactly
+
+IMPORTANT: Return ONLY the corrected text. No explanations, no JSON, no markdown — just the corrected text.
+
+TEXT TO CORRECT:
+"""
+${text}
+"""
+
+CORRECTED TEXT (${langName}):`;
+
+    const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
+    return r.text.trim();
+  }
+
+  function updateTranscriptWithCorrection(original, corrected) {
+    // Find and replace corrected text in transcript blocks
+    const blocks = dom.transcript.querySelectorAll('.transcript-block');
+    for (const block of blocks) {
+      if (block.textContent.includes(original)) {
+        block.textContent = block.textContent.replace(original, corrected) + ' ';
+      }
+    }
   }
 
   function getAdaptiveInterval() {
@@ -448,6 +528,7 @@
     dom.stopBtn.classList.add('hidden');
     setStatus(t('status_stopped'));
     if (state.checkTimer) { clearTimeout(state.checkTimer); state.checkTimer = null; }
+    if (state.correctionTimer) { clearInterval(state.correctionTimer); state.correctionTimer = null; }
 
     if (!state.batchMode) {
       if (state.mode === 'youtube') stopYouTubeMode();
@@ -652,6 +733,7 @@
   function clearTranscript() {
     state.transcript = []; state.fullText = ''; state.pendingText = '';
     state.wordCount = 0; state.claims.clear(); state.claimIdCounter = 0;
+    state.lastCorrectedLength = 0;  // Reset correction tracking
     dom.transcript.innerHTML = '<p class="placeholder-text">Transcript will appear here once you start...</p>';
     updateStats();
   }
