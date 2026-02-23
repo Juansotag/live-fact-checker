@@ -522,13 +522,6 @@
     p.textContent = state.fullText;
     dom.transcript.appendChild(p);
   }
-  }
-
-  function rebuildTranscriptDisplay() {
-    // DISABLED: Don't rebuild entire display as it loses streaming captions
-    // The transcript display works fine with individual caption blocks
-    // Correction updates state internally without UI disruption
-  }
 
   async function correctText(text) {
     const lang = getEffectiveLanguage();
