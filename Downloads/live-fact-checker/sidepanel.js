@@ -443,36 +443,47 @@
   async function performTextCorrection() {
     // Get new text that hasn't been corrected yet
     const newText = state.fullText.slice(state.lastCorrectedLength).trim();
-    if (newText.length < 20) {
+    
+    // Correct in smaller chunks (~150 chars) to avoid Gemini truncation
+    const MAX_CHUNK = 150;
+    if (newText.length < 30) {
       console.log(`[TextCorrection] Skipping: text too short (${newText.length} chars)`);
       return;
     }
     
-    console.log(`[TextCorrection] Correcting ${newText.length} chars of new text:`, newText.substring(0, 50) + '...');
+    // If more than MAX_CHUNK, only correct the first chunk
+    let textToCorrect = newText;
+    if (newText.length > MAX_CHUNK) {
+      textToCorrect = newText.substring(0, MAX_CHUNK);
+      console.log(`[TextCorrection] Correcting chunk: first ${MAX_CHUNK} of ${newText.length} chars`);
+    } else {
+      console.log(`[TextCorrection] Correcting ${textToCorrect.length} chars of new text: ${textToCorrect.substring(0, 50)}...`);
+    }
     
     try {
-      const correctedText = await correctText(newText);
-      console.log(`[TextCorrection] Gemini returned:`, correctedText ? correctedText.substring(0, 50) + '...' : 'EMPTY');
+      const correctedText = await correctText(textToCorrect);
+      console.log(`[TextCorrection] Gemini returned ${correctedText.length} chars: "${correctedText.substring(0, 50)}..."`);
       
-      if (correctedText && correctedText.length > 5) {
-        // Update fullText with corrected version (only the new part)
+      if (correctedText && correctedText.length > 10) {
+        // Update fullText with corrected version (only this chunk)
         const beforeNew = state.fullText.slice(0, state.lastCorrectedLength);
         const updated = beforeNew + correctedText;
         
-        console.log(`[TextCorrection] Before: "${beforeNew.substring(beforeNew.length - 30)}"`);
-        console.log(`[TextCorrection] New corrected: "${correctedText.substring(0, 50)}"`);
+        // If there's more text after this correction, preserve it
+        const afterCorrection = state.fullText.slice(state.lastCorrectedLength + textToCorrect.length);
+        const finalText = updated + (afterCorrection ? ' ' + afterCorrection : '');
         
-        state.fullText = updated;
-        state.pendingText = state.pendingText.replace(newText, correctedText);
+        state.fullText = finalText;
+        state.lastCorrectedLength = state.lastCorrectedLength + correctedText.length;
         
-        console.log(`[TextCorrection] ✓ Corrected and updated state`);
+        console.log(`[TextCorrection] ✓ Updated state (now at position ${state.lastCorrectedLength})`);
       } else {
-        console.warn(`[TextCorrection] Returned text is empty or too short`);
+        console.warn(`[TextCorrection] Empty response from Gemini, advancing pointer`);
+        state.lastCorrectedLength += textToCorrect.length;
       }
-      
-      state.lastCorrectedLength = state.fullText.length;
     } catch (err) {
       console.error('[TextCorrection] Error:', err.message);
+      state.lastCorrectedLength += textToCorrect.length;  // Advance even on error
     }
   }
 
@@ -487,48 +498,35 @@
     const langNames = {en:'English',es:'Spanish'};
     const langName = langNames[lang] || 'Spanish';
     
-    // Get context of previous 200 chars to understand sentence flow
-    const contextStart = Math.max(0, state.fullText.length - state.lastCorrectedLength - 200);
-    const prevContext = state.fullText.slice(contextStart, state.lastCorrectedLength).trim();
-    
-    const prompt = `TASK: Fix ONLY punctuation, capitalization, and spacing errors in live captions.
+    const prompt = `Fix punctuation and capitalization ONLY. Return the corrected text, nothing else.
 
-RULES - DO NOT VIOLATE:
-1. DO NOT paraphrase, restructure, or rephrase anything
-2. DO NOT change word order or add/remove words (except fixing obvious CC errors like "eh" filler words)
-3. DO NOT break sentences into multiple lines
-4. ONLY modify these punctuation marks: . , ; : " ' - ?
-5. Add capital letters after sentence-ending punctuation
-6. Remove repetitive filler words (eh, uh, hm) but keep the core text
-7. Fix obvious closed captions errors (e.g., "de la Lo" → "de la. Lo")
+Text: "${text}"
 
-CONTEXT (what was said before):
-${prevContext}
+Rules:
+- Do NOT change words or word order
+- Only fix: . , ; : " ' - ? and capitalization
+- Remove repetitive filler words like "eh", "uh" (optional)
+- Keep original meaning exactly
 
-NEW TEXT TO PUNCTUATE:
-"""
-${text}
-"""
+Corrected:`;
 
-OUTPUT RULES: Return ONLY the corrected text. No explanations, no markdown, no JSON.`;
-
-    console.log(`[correctText] Calling Gemini with prompt (${prompt.length} chars)...`);
+    console.log(`[correctText] Calling Gemini (${prompt.length} chars, text=${text.length} chars)...`);
     
     try {
-      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
+      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 300 });
       console.log(`[correctText] Response:`, r);
       
       if (!r || !r.text) {
-        console.warn(`[correctText] No response or empty text from Gemini`);
-        return text;  // Return original if Gemini fails
+        console.warn(`[correctText] No response`);
+        return text;
       }
       
       const corrected = r.text.trim();
-      console.log(`[correctText] Corrected text (${corrected.length} chars): "${corrected.substring(0, 80)}..."`);
+      console.log(`[correctText] Got ${corrected.length} chars: "${corrected.substring(0, 60)}..."`);
       return corrected;
     } catch (err) {
       console.error(`[correctText] Exception:`, err);
-      return text;  // Return original on error
+      return text;
     }
   }
 
