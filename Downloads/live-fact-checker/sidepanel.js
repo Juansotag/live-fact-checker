@@ -488,7 +488,10 @@
         state.fullText = (beforeText + correctedText + (afterText ? ' ' + afterText : '')).trim();
         state.lastCorrectedLength = (beforeText + correctedText).length;
         
-        console.log(`[TextCorrection] ✓ Applied correction (${textToCorrect.length}→${correctedText.length} chars, ratio ${lengthRatio.toFixed(2)})`);
+        console.log(`[TextCorrection] ✓ CORRECTED:`);
+        console.log(`  ORIGINAL: "${textToCorrect}"`);
+        console.log(`  CORRECTED: "${correctedText}"`);
+        console.log(`  (${textToCorrect.length}→${correctedText.length} chars, ratio ${lengthRatio.toFixed(2)})`);
       } else {
         console.warn(`[TextCorrection] Empty response, advancing pointer`);
         state.lastCorrectedLength += textToCorrect.length;
@@ -509,8 +512,15 @@
     const lang = getEffectiveLanguage();
     const langName = lang === 'en' ? 'English' : 'Spanish';
     
-    // Ultra-simple prompt to avoid confusion
-    const prompt = `Fix ONLY punctuation and capitalize first letter of sentences in this ${langName} text. Do NOT change any words or word order.
+    // More aggressive prompt that explicitly removes CC errors and fillers
+    const prompt = `Fix closed captions errors in this ${langName} text:
+
+RULES:
+1. Remove filler words: "eh", "uh", "hm" (but keep core text)
+2. Fix CC errors: "e para" → "para", "eh que" → "que", double spaces → single space
+3. Fix punctuation and capitalization (period at end of sentences)
+4. Keep the same MEANING and CONTENT (don't add/change words)
+5. Return ONLY the corrected text, nothing else
 
 TEXT: """${text}"""
 
