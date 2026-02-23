@@ -475,20 +475,30 @@
     const langNames = {en:'English',es:'Spanish'};
     const langName = langNames[lang] || 'Spanish';
     
-    const prompt = `You are a professional editor. Correct ONLY the following issues in this ${langName} text:
-- Fix punctuation and capitalization
-- Correct spelling errors
-- Improve grammar and readability
-- Maintain the original meaning exactly
+    // Get context of previous 200 chars to understand sentence flow
+    const contextStart = Math.max(0, state.fullText.length - state.lastCorrectedLength - 200);
+    const prevContext = state.fullText.slice(contextStart, state.lastCorrectedLength).trim();
+    
+    const prompt = `TASK: Fix ONLY punctuation, capitalization, and spacing errors in live captions.
 
-IMPORTANT: Return ONLY the corrected text. No explanations, no JSON, no markdown — just the corrected text.
+RULES - DO NOT VIOLATE:
+1. DO NOT paraphrase, restructure, or rephrase anything
+2. DO NOT change word order or add/remove words (except fixing obvious CC errors like "eh" filler words)
+3. DO NOT break sentences into multiple lines
+4. ONLY modify these punctuation marks: . , ; : " ' - ?
+5. Add capital letters after sentence-ending punctuation
+6. Remove repetitive filler words (eh, uh, hm) but keep the core text
+7. Fix obvious closed captions errors (e.g., "de la Lo" → "de la. Lo")
 
-TEXT TO CORRECT:
+CONTEXT (what was said before):
+${prevContext}
+
+NEW TEXT TO PUNCTUATE:
 """
 ${text}
 """
 
-CORRECTED TEXT (${langName}):`;
+OUTPUT RULES: Return ONLY the corrected text. No explanations, no markdown, no JSON.`;
 
     const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 512 });
     return r.text.trim();
