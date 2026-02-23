@@ -449,16 +449,13 @@
     
     try {
       const correctedText = await correctText(newText);
-      if (correctedText && correctedText !== newText) {
-        // Update fullText with corrected version
+      if (correctedText && correctedText.length > 5) {
+        // Update fullText with corrected version (only the new part)
         const beforeNew = state.fullText.slice(0, state.lastCorrectedLength);
         state.fullText = beforeNew + correctedText;
         state.pendingText = state.pendingText.replace(newText, correctedText);
         
-        // Rebuild transcript display with corrected text
-        rebuildTranscriptDisplay();
-        
-        console.log(`[TextCorrection] ✓ Corrected and updated display`);
+        console.log(`[TextCorrection] ✓ Corrected internally (no UI rebuild)`);
       }
       
       state.lastCorrectedLength = state.fullText.length;
@@ -468,17 +465,9 @@
   }
 
   function rebuildTranscriptDisplay() {
-    // Clear and rebuild transcript UI with corrected text
-    const placeholder = dom.transcript.querySelector('.placeholder-text');
-    if (placeholder) placeholder.remove();
-    
-    dom.transcript.innerHTML = '';
-    
-    // Show the entire corrected text as flowing paragraph
-    const para = document.createElement('p');
-    para.className = 'transcript-block';
-    para.textContent = state.fullText;
-    dom.transcript.appendChild(para);
+    // DISABLED: Don't rebuild entire display as it loses streaming captions
+    // The transcript display works fine with individual caption blocks
+    // Correction updates state internally without UI disruption
   }
 
   async function correctText(text) {
