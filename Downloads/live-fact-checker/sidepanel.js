@@ -444,46 +444,58 @@
     // Get new text that hasn't been corrected yet
     const newText = state.fullText.slice(state.lastCorrectedLength).trim();
     
-    // Correct in smaller chunks (~150 chars) to avoid Gemini truncation
-    const MAX_CHUNK = 150;
     if (newText.length < 30) {
-      console.log(`[TextCorrection] Skipping: text too short (${newText.length} chars)`);
+      console.log(`[TextCorrection] Skipping: too short (${newText.length} chars)`);
       return;
     }
     
-    // If more than MAX_CHUNK, only correct the first chunk
+    // Try to find a complete sentence (ending with . ? ! or , for pauses)
+    const sentenceEnds = ['. ', '? ', '! ', ', '];  // Look for complete boundaries
     let textToCorrect = newText;
-    if (newText.length > MAX_CHUNK) {
-      textToCorrect = newText.substring(0, MAX_CHUNK);
-      console.log(`[TextCorrection] Correcting chunk: first ${MAX_CHUNK} of ${newText.length} chars`);
+    let lastSentenceEnd = -1;
+    
+    for (const end of sentenceEnds) {
+      const idx = newText.lastIndexOf(end);
+      if (idx > 0 && idx > lastSentenceEnd) {
+        lastSentenceEnd = idx + end.length;
+      }
+    }
+    
+    // If we found a sentence boundary, only correct up to that point
+    // Otherwise, correct everything we have so far
+    if (lastSentenceEnd > 50) {
+      textToCorrect = newText.substring(0, lastSentenceEnd).trim();
+      console.log(`[TextCorrection] Found sentence boundary: correcting ${textToCorrect.length} chars`);
     } else {
-      console.log(`[TextCorrection] Correcting ${textToCorrect.length} chars of new text: ${textToCorrect.substring(0, 50)}...`);
+      console.log(`[TextCorrection] No sentence boundary found, using whole chunk: ${textToCorrect.length} chars`);
     }
     
     try {
+      console.log(`[TextCorrection] Sending to Gemini: "${textToCorrect.substring(0, 60)}..."`);
       const correctedText = await correctText(textToCorrect);
-      console.log(`[TextCorrection] Gemini returned ${correctedText.length} chars: "${correctedText.substring(0, 50)}..."`);
       
-      if (correctedText && correctedText.length > 10) {
-        // Update fullText with corrected version (only this chunk)
-        const beforeNew = state.fullText.slice(0, state.lastCorrectedLength);
-        const updated = beforeNew + correctedText;
+      if (correctedText && correctedText.length > 20) {
+        // Validate: corrected should be roughly same length as original
+        const lengthRatio = correctedText.length / textToCorrect.length;
+        if (lengthRatio < 0.5 || lengthRatio > 1.5) {
+          console.warn(`[TextCorrection] Response too different (ratio ${lengthRatio.toFixed(2)}), keeping original`);
+          state.lastCorrectedLength += textToCorrect.length;
+          return;
+        }
         
-        // If there's more text after this correction, preserve it
-        const afterCorrection = state.fullText.slice(state.lastCorrectedLength + textToCorrect.length);
-        const finalText = updated + (afterCorrection ? ' ' + afterCorrection : '');
+        const beforeText = state.fullText.slice(0, state.lastCorrectedLength);
+        const afterText = state.fullText.slice(state.lastCorrectedLength + textToCorrect.length);
+        state.fullText = (beforeText + correctedText + (afterText ? ' ' + afterText : '')).trim();
+        state.lastCorrectedLength = (beforeText + correctedText).length;
         
-        state.fullText = finalText;
-        state.lastCorrectedLength = state.lastCorrectedLength + correctedText.length;
-        
-        console.log(`[TextCorrection] ✓ Updated state (now at position ${state.lastCorrectedLength})`);
+        console.log(`[TextCorrection] ✓ Applied correction, now at position ${state.lastCorrectedLength}`);
       } else {
-        console.warn(`[TextCorrection] Empty response from Gemini, advancing pointer`);
+        console.warn(`[TextCorrection] Empty response, advancing pointer`);
         state.lastCorrectedLength += textToCorrect.length;
       }
     } catch (err) {
       console.error('[TextCorrection] Error:', err.message);
-      state.lastCorrectedLength += textToCorrect.length;  // Advance even on error
+      state.lastCorrectedLength += textToCorrect.length;
     }
   }
 
@@ -495,26 +507,20 @@
 
   async function correctText(text) {
     const lang = getEffectiveLanguage();
-    const langNames = {en:'English',es:'Spanish'};
-    const langName = langNames[lang] || 'Spanish';
+    const langName = lang === 'en' ? 'English' : 'Spanish';
     
-    const prompt = `Fix punctuation and capitalization ONLY. Return the corrected text, nothing else.
+    // Ultra-simple prompt to avoid confusion
+    const prompt = `Fix ONLY punctuation and capitalize first letter of sentences in this ${langName} text. Do NOT change any words or word order.
 
-Text: "${text}"
+TEXT: """${text}"""
 
-Rules:
-- Do NOT change words or word order
-- Only fix: . , ; : " ' - ? and capitalization
-- Remove repetitive filler words like "eh", "uh" (optional)
-- Keep original meaning exactly
+CORRECTED:`;
 
-Corrected:`;
-
-    console.log(`[correctText] Calling Gemini (${prompt.length} chars, text=${text.length} chars)...`);
+    console.log(`[correctText] Calling Gemini (text=${text.length} chars)...`);
     
     try {
-      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 300 });
-      console.log(`[correctText] Response:`, r);
+      const r = await callGemini(prompt, { temperature: 0.1, maxTokens: 1024 });
+      console.log(`[correctText] Raw response:`, r);
       
       if (!r || !r.text) {
         console.warn(`[correctText] No response`);
@@ -522,7 +528,8 @@ Corrected:`;
       }
       
       const corrected = r.text.trim();
-      console.log(`[correctText] Got ${corrected.length} chars: "${corrected.substring(0, 60)}..."`);
+      console.log(`[correctText] Got corrected (${corrected.length} chars vs original ${text.length})`);
+      
       return corrected;
     } catch (err) {
       console.error(`[correctText] Exception:`, err);
