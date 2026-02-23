@@ -480,6 +480,8 @@
     para.textContent = state.fullText;
     dom.transcript.appendChild(para);
   }
+
+  async function correctText(text) {
     const lang = getEffectiveLanguage();
     const langNames = {en:'English',es:'Spanish'};
     const langName = langNames[lang] || 'Spanish';
